@@ -39,6 +39,12 @@ exported_configs:
         go_struct:
           type: go.opentelemetry.io/collector/config/configstorage.ID
           field_name: StorageID
+      concurrency_controller:
+        type: component_id
+        optional: true
+        description: Identifies an extension that provides concurrency control for the queue.
+        go_struct:
+          field_name: ConcurrencyControllerID
       num_consumers:
         type: int
         description: |

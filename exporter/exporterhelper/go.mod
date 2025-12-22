@@ -18,6 +18,7 @@ require (
 	go.opentelemetry.io/collector/consumer/consumertest v0.166.0
 	go.opentelemetry.io/collector/exporter v1.72.0
 	go.opentelemetry.io/collector/exporter/exportertest v0.166.0
+	go.opentelemetry.io/collector/extension/extensioncapabilities v0.166.0
 	go.opentelemetry.io/collector/extension/extensiontest v0.166.0
 	go.opentelemetry.io/collector/extension/xextension v0.166.0
 	go.opentelemetry.io/collector/featuregate v1.72.0
@@ -58,6 +59,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/collector/component/componentstatus v0.166.0 // indirect
 	go.opentelemetry.io/collector/consumer/xconsumer v0.166.0 // indirect
 	go.opentelemetry.io/collector/exporter/xexporter v0.166.0 // indirect
 	go.opentelemetry.io/collector/extension v1.72.0 // indirect
@@ -130,3 +132,5 @@ replace go.opentelemetry.io/collector/internal/componentalias => ../../internal/
 replace go.opentelemetry.io/collector/pipeline/xpipeline => ../../pipeline/xpipeline
 
 replace go.opentelemetry.io/collector/internal/telemetry => ../../internal/telemetry
+
+replace go.opentelemetry.io/collector/extension/extensioncapabilities => ../../extension/extensioncapabilities
