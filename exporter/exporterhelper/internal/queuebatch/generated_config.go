@@ -90,8 +90,8 @@ type Config struct {
 	// as a storage extension for the persistent queue.
 	StorageID configoptional.Optional[configstorage.ID] `mapstructure:"storage,omitempty"`
 
-	// RequestMiddlewareID identifies an extension that provides request middleware for the queue.
-	RequestMiddlewareID configoptional.Optional[component.ID] `mapstructure:"concurrency_controller,omitempty"`
+	// RequestMiddlewares identifies request middleware extensions that intercept export requests after they are pulled from the queue.
+	RequestMiddlewares []component.ID `mapstructure:"request_middlewares,omitempty"`
 
 	// NumConsumers is the maximum number of concurrent consumers from the queue.
 	// This applies across all different optional configurations from above

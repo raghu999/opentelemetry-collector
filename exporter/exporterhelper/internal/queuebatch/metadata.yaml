@@ -39,12 +39,11 @@ exported_configs:
         go_struct:
           type: go.opentelemetry.io/collector/config/configstorage.ID
           field_name: StorageID
-      concurrency_controller:
-        type: component_id
-        optional: true
-        description: Identifies an extension that provides request middleware for the queue.
-        go_struct:
-          field_name: RequestMiddlewareID
+      request_middlewares:
+        type: slice
+        values:
+          type: component_id
+        description: Identifies request middleware extensions that intercept export requests after they are pulled from the queue.
       num_consumers:
         type: int
         description: |

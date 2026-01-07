@@ -119,10 +119,6 @@
           "type": "boolean",
           "description": "Determines the behavior when the component's TotalSize limit is reached.\nIf true, the component will wait for space; otherwise, operations will immediately return a retryable error.\n"
         },
-        "concurrency_controller": {
-          "type": "string",
-          "description": "Identifies an extension that provides request middleware for the queue."
-        },
         "num_consumers": {
           "type": "integer",
           "description": "Is the maximum number of concurrent consumers from the queue.\nThis applies across all different optional configurations from above \n(e.g. wait_for_result, block_on_overflow, storage, etc.).\n",
@@ -132,6 +128,13 @@
           "type": "integer",
           "description": "Represents the maximum data size allowed for concurrent storage and processing.",
           "exclusiveMinimum": 0
+        },
+        "request_middlewares": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Identifies request middleware extensions that intercept export requests after they are pulled from the queue."
         },
         "sizer": {
           "type": "string",
