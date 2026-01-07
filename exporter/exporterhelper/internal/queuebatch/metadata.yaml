@@ -42,9 +42,9 @@ exported_configs:
       concurrency_controller:
         type: component_id
         optional: true
-        description: Identifies an extension that provides concurrency control for the queue.
+        description: Identifies an extension that provides request middleware for the queue.
         go_struct:
-          field_name: ConcurrencyControllerID
+          field_name: RequestMiddlewareID
       num_consumers:
         type: int
         description: |

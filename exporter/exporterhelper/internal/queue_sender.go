@@ -6,7 +6,6 @@ package internal // import "go.opentelemetry.io/collector/exporter/exporterhelpe
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -19,8 +18,6 @@ import (
 	"go.opentelemetry.io/collector/extension/extensioncapabilities"
 	"go.opentelemetry.io/collector/pipeline"
 )
-
-const minConsumersWithController = 200
 
 // NewDefaultQueueConfig returns the default config for queuebatch.Config.
 // By default:
@@ -50,11 +47,11 @@ func NewDefaultQueueConfig() queuebatch.Config {
 	}
 }
 
-// queueSender wraps QueueBatch to add ConcurrencyController logic.
+// queueSender wraps QueueBatch to add RequestMiddleware logic.
 type queueSender struct {
 	*queuebatch.QueueBatch
-	ctrlID *component.ID
-	ctrl   extensioncapabilities.ConcurrencyController
+	mwID *component.ID
+	mw   extensioncapabilities.RequestMiddleware
 
 	// Capture these fields during creation so we can use them in Start()
 	// because QueueBatch does not expose them publicly.
@@ -68,7 +65,7 @@ func NewQueueSender(
 	exportFailureMessage string,
 	next sender.Sender[request.Request],
 ) (sender.Sender[request.Request], error) {
-	if !qCfg.ConcurrencyControllerID.HasValue() {
+	if !qCfg.RequestMiddlewareID.HasValue() {
 		exportFunc := func(ctx context.Context, req request.Request) error {
 			// Have to read the number of items before sending the request since the request can
 			// be modified by the downstream components like the batcher.
@@ -84,19 +81,20 @@ func NewQueueSender(
 		return queuebatch.NewQueueBatch(qSet, qCfg, exportFunc)
 	}
 
-	enforceMinConsumers(&qCfg, qSet.Telemetry.Logger)
+	warnIfNumConsumersMayCapMiddleware(&qCfg, qSet.Telemetry.Logger)
 
 	qs := &queueSender{
-		ctrlID: qCfg.ConcurrencyControllerID.Get(),
+		mwID:   qCfg.RequestMiddlewareID.Get(),
 		id:     qSet.ID,
 		signal: qSet.Signal,
+		mw:     extensioncapabilities.NoopRequestMiddleware(), // Initialize with no-op to avoid nil checks
 	}
 
 	exportFunc := func(ctx context.Context, req request.Request) error {
 		itemsCount := req.ItemsCount()
 
-		ctrl := qs.ctrl
-		if ctrl == nil {
+		// Wrap the actual export call in a closure for the middleware
+		nextCall := func(ctx context.Context) error {
 			if errSend := next.Send(ctx, req); errSend != nil {
 				qSet.Telemetry.Logger.Error("Exporting failed. Dropping data."+exportFailureMessage,
 					zap.Error(errSend), zap.Int("dropped_items", itemsCount))
@@ -104,22 +102,9 @@ func NewQueueSender(
 			}
 			return nil
 		}
-		// This blocks the worker if the dynamic limit is reached.
-		if err := ctrl.Acquire(ctx); err != nil {
-			return err
-		}
 
-		start := time.Now()
-		var errSend error
-		defer func() { ctrl.Record(ctx, time.Since(start), errSend) }()
-
-		errSend = next.Send(ctx, req)
-		if errSend != nil {
-			qSet.Telemetry.Logger.Error("Exporting failed. Dropping data."+exportFailureMessage,
-				zap.Error(errSend), zap.Int("dropped_items", itemsCount))
-			return errSend
-		}
-		return nil
+		// Use the middleware to execute the request
+		return qs.mw.Handle(ctx, nextCall)
 	}
 
 	qb, err := queuebatch.NewQueueBatch(qSet, qCfg, exportFunc)
@@ -131,76 +116,67 @@ func NewQueueSender(
 	return qs, nil
 }
 
-// enforceMinConsumers ensures sufficient worker headroom when a concurrency controller is configured.
-func enforceMinConsumers(cfg *queuebatch.Config, logger *zap.Logger) {
-	controllerID := cfg.ConcurrencyControllerID.Get()
-	if controllerID == nil {
+// warnIfNumConsumersMayCapMiddleware ensures sufficient worker headroom when a concurrency controller is configured.
+func warnIfNumConsumersMayCapMiddleware(cfg *queuebatch.Config, logger *zap.Logger) {
+	middlewareID := cfg.RequestMiddlewareID.Get()
+	if middlewareID == nil {
 		return
 	}
 
 	defaultConsumers := NewDefaultQueueConfig().NumConsumers
 
-	// If the user left the default worker count, bump it to allow the controller to be the governor.
-	if cfg.NumConsumers == defaultConsumers && cfg.NumConsumers < minConsumersWithController {
-		if logger != nil {
-			logger.Warn("sending_queue.num_consumers overridden because concurrency_controller is configured",
-				zap.Int("original", cfg.NumConsumers),
-				zap.Int("override", minConsumersWithController),
-				zap.String("controller", controllerID.String()),
-			)
-		}
-		cfg.NumConsumers = minConsumersWithController
-		return
-	}
-
-	// If the user explicitly set num_consumers below the recommended headroom, don't override,
-	// but warn that the controller will be capped by the worker pool.
-	if cfg.NumConsumers > 0 && cfg.NumConsumers < minConsumersWithController && logger != nil {
-		logger.Warn("sending_queue.num_consumers caps concurrency_controller; consider increasing num_consumers for headroom",
+	// If the user left the default worker count, warn that the worker pool might artificially cap the controller.
+	if cfg.NumConsumers == defaultConsumers && logger != nil {
+		logger.Warn("sending_queue.num_consumers is at the default; request middleware may be capped by worker pool",
 			zap.Int("num_consumers", cfg.NumConsumers),
-			zap.Int("recommended_min", minConsumersWithController),
-			zap.String("controller", controllerID.String()),
+			zap.String("concurrency_controller", middlewareID.String()),
 		)
 	}
 }
 
 // Start overrides the default Start to resolve the extension.
 func (qs *queueSender) Start(ctx context.Context, host component.Host) error {
-	if qs.ctrlID != nil {
-		ext, ok := host.GetExtensions()[*qs.ctrlID]
+	if qs.mwID != nil {
+		ext, ok := host.GetExtensions()[*qs.mwID]
 		if !ok {
-			return fmt.Errorf("concurrency controller extension %q not found", qs.ctrlID.String())
+			return fmt.Errorf("request middleware extension %q not found", qs.mwID.String())
 		}
-		factory, ok := ext.(extensioncapabilities.ConcurrencyControllerFactory)
+		factory, ok := ext.(extensioncapabilities.RequestMiddlewareFactory)
 		if !ok {
-			return fmt.Errorf("extension %q does not implement ConcurrencyControllerFactory", qs.ctrlID.String())
+			return fmt.Errorf("extension %q does not implement RequestMiddlewareFactory", qs.mwID.String())
 		}
-		ctrl, err := factory.CreateConcurrencyController(qs.id, qs.signal)
+		mw, err := factory.CreateRequestMiddleware(qs.id, qs.signal)
 		if err != nil {
-			return fmt.Errorf("failed to create concurrency controller: %w", err)
+			return fmt.Errorf("failed to create request middleware: %w", err)
 		}
-		qs.ctrl = ctrl
+
+		// Guard against nil return from factory to avoid panic in Handle()
+		if mw != nil {
+			qs.mw = mw
+		}
 	}
 
 	if err := qs.QueueBatch.Start(ctx, host); err != nil {
-		if qs.ctrl != nil {
-			_ = qs.ctrl.Shutdown(ctx)
-			qs.ctrl = nil
+		if qs.mw != nil {
+			_ = qs.mw.Shutdown(ctx)
+			// Reset to no-op on failure cleanup
+			qs.mw = extensioncapabilities.NoopRequestMiddleware()
 		}
 		return err
 	}
 	return nil
 }
 
-// Shutdown ensures the controller is also shut down.
+// Shutdown ensures the middleware is also shut down.
 func (qs *queueSender) Shutdown(ctx context.Context) error {
 	errQ := qs.QueueBatch.Shutdown(ctx)
 
-	if qs.ctrl != nil {
-		if err := qs.ctrl.Shutdown(ctx); err != nil && errQ == nil {
+	if qs.mw != nil {
+		if err := qs.mw.Shutdown(ctx); err != nil && errQ == nil {
 			return err
 		}
-		qs.ctrl = nil
+		// Reset to no-op after shutdown
+		qs.mw = extensioncapabilities.NoopRequestMiddleware()
 	}
 	return errQ
 }

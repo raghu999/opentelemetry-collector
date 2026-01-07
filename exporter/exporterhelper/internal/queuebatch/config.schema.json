@@ -121,7 +121,7 @@
         },
         "concurrency_controller": {
           "type": "string",
-          "description": "Identifies an extension that provides concurrency control for the queue."
+          "description": "Identifies an extension that provides request middleware for the queue."
         },
         "num_consumers": {
           "type": "integer",

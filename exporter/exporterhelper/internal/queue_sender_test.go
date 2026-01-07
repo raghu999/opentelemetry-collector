@@ -86,34 +86,31 @@ func TestQueueConfig_Validate(t *testing.T) {
 	assert.NoError(t, noCfg.Validate())
 }
 
-type mockConcurrencyController struct {
-	extensioncapabilities.ConcurrencyController
-	acquired atomic.Int64
-	recorded atomic.Int64
+// --- New Tests for Request Middleware ---
+
+type mockRequestMiddleware struct {
+	extensioncapabilities.RequestMiddleware
+	handled  atomic.Int64
 	shutdown atomic.Int64
 }
 
-func (m *mockConcurrencyController) Acquire(ctx context.Context) error {
-	m.acquired.Add(1)
-	return nil
+func (m *mockRequestMiddleware) Handle(ctx context.Context, next func(context.Context) error) error {
+	m.handled.Add(1)
+	return next(ctx)
 }
 
-func (m *mockConcurrencyController) Record(ctx context.Context, dur time.Duration, err error) {
-	m.recorded.Add(1)
-}
-
-func (m *mockConcurrencyController) Shutdown(ctx context.Context) error {
+func (m *mockRequestMiddleware) Shutdown(ctx context.Context) error {
 	m.shutdown.Add(1)
 	return nil
 }
 
-type mockConcurrencyFactory struct {
+type mockRequestMiddlewareFactory struct {
 	component.Component
-	ctrl *mockConcurrencyController
+	mw *mockRequestMiddleware
 }
 
-func (m *mockConcurrencyFactory) CreateConcurrencyController(id component.ID, sig pipeline.Signal) (extensioncapabilities.ConcurrencyController, error) {
-	return m.ctrl, nil
+func (m *mockRequestMiddlewareFactory) CreateRequestMiddleware(id component.ID, sig pipeline.Signal) (extensioncapabilities.RequestMiddleware, error) {
+	return m.mw, nil
 }
 
 type mockHost struct {
@@ -125,14 +122,14 @@ func (m *mockHost) GetExtensions() map[component.ID]component.Component {
 	return m.ext
 }
 
-func TestQueueSenderWithConcurrencyController(t *testing.T) {
-	ctrlID := component.MustNewID("adaptive_concurrency")
-	mockCtrl := &mockConcurrencyController{}
-	mockFact := &mockConcurrencyFactory{ctrl: mockCtrl}
+func TestQueueSenderWithRequestMiddleware(t *testing.T) {
+	mwID := component.MustNewID("request_middleware")
+	mockMw := &mockRequestMiddleware{}
+	mockFact := &mockRequestMiddlewareFactory{mw: mockMw}
 
 	host := &mockHost{
 		ext: map[component.ID]component.Component{
-			ctrlID: mockFact,
+			mwID: mockFact,
 		},
 	}
 
@@ -142,7 +139,7 @@ func TestQueueSenderWithConcurrencyController(t *testing.T) {
 		Telemetry: componenttest.NewNopTelemetrySettings(),
 	}
 	qCfg := NewDefaultQueueConfig()
-	qCfg.ConcurrencyControllerID = configoptional.Some(ctrlID)
+	qCfg.RequestMiddlewareID = configoptional.Some(mwID)
 
 	nextSender := sender.NewSender(func(ctx context.Context, req request.Request) error {
 		return nil
@@ -157,79 +154,91 @@ func TestQueueSenderWithConcurrencyController(t *testing.T) {
 	// Assertions AFTER Shutdown to avoid flakes with async worker processing.
 	require.NoError(t, qs.Shutdown(context.Background()))
 
-	assert.Equal(t, int64(1), mockCtrl.acquired.Load())
-	assert.Equal(t, int64(1), mockCtrl.recorded.Load())
-	assert.Equal(t, int64(1), mockCtrl.shutdown.Load())
+	assert.Equal(t, int64(1), mockMw.handled.Load())
+	assert.Equal(t, int64(1), mockMw.shutdown.Load())
 }
 
-func TestNewQueueSender_ConcurrencyControllerEnforcesMinConsumers(t *testing.T) {
-	ctrlID := component.MustNewID("adaptive_concurrency")
+func TestNewQueueSender_RequestMiddleware_LogsWarningOnDefaultConsumers(t *testing.T) {
+	mwID := component.MustNewID("request_middleware")
 
 	tests := []struct {
 		name          string
 		inputConfig   queuebatch.Config
 		wantConsumers int
+		wantLog       bool
 	}{
 		{
-			name: "upgrade_low_consumer_count",
+			name: "warn_on_default_consumer_count",
 			inputConfig: func() queuebatch.Config {
 				cfg := NewDefaultQueueConfig()
-				cfg.ConcurrencyControllerID = configoptional.Some(ctrlID)
+				cfg.RequestMiddlewareID = configoptional.Some(mwID)
 				cfg.NumConsumers = 10
 				return cfg
 			}(),
-			wantConsumers: 200,
+			wantConsumers: 10, // Should NOT change
+			wantLog:       true,
 		},
 		{
 			name: "respect_high_consumer_count",
 			inputConfig: func() queuebatch.Config {
 				cfg := NewDefaultQueueConfig()
-				cfg.ConcurrencyControllerID = configoptional.Some(ctrlID)
+				cfg.RequestMiddlewareID = configoptional.Some(mwID)
 				cfg.NumConsumers = 500
 				return cfg
 			}(),
 			wantConsumers: 500,
+			wantLog:       false,
 		},
 		{
-			name: "ignore_if_controller_disabled",
+			name: "ignore_if_middleware_disabled",
 			inputConfig: func() queuebatch.Config {
 				cfg := NewDefaultQueueConfig()
-				cfg.ConcurrencyControllerID = configoptional.None[component.ID]()
+				cfg.RequestMiddlewareID = configoptional.None[component.ID]()
 				cfg.NumConsumers = 10
 				return cfg
 			}(),
 			wantConsumers: 10,
+			wantLog:       false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			logger, observed := observer.New(zap.WarnLevel)
 			cfg := tt.inputConfig
-			enforceMinConsumers(&cfg, zap.NewNop())
+
+			warnIfNumConsumersMayCapMiddleware(&cfg, zap.New(logger))
+
 			assert.Equal(t, tt.wantConsumers, cfg.NumConsumers)
+			if tt.wantLog {
+				require.Len(t, observed.All(), 1, "Expected a warning log")
+				assert.Contains(t, observed.All()[0].Message, "sending_queue.num_consumers is at the default")
+			} else {
+				assert.Len(t, observed.All(), 0, "Expected no warning logs")
+			}
 		})
 	}
 }
 
-func TestQueueSender_ConcurrencyController_Disabled_NoInteraction(t *testing.T) {
+func TestQueueSender_RequestMiddleware_Disabled_NoInteraction(t *testing.T) {
 	// 1. Setup a host with the extension available, but do NOT use it.
-	ctrlID := component.MustNewID("adaptive_concurrency")
-	mockCtrl := &mockConcurrencyController{}
-	mockFact := &mockConcurrencyFactory{ctrl: mockCtrl}
+	mwID := component.MustNewID("request_middleware")
+	mockMw := &mockRequestMiddleware{}
+	mockFact := &mockRequestMiddlewareFactory{mw: mockMw}
 	host := &mockHost{
 		ext: map[component.ID]component.Component{
-			ctrlID: mockFact,
+			mwID: mockFact,
 		},
 	}
 
-	// 2. do NOT configure the ConcurrencyControllerID in the queue settings.
+	// 2. do NOT configure the RequestMiddlewareID in the queue settings.
 	qSet := queuebatch.AllSettings[request.Request]{
 		ID:        component.MustNewID("otlp"),
 		Signal:    pipeline.SignalTraces,
 		Telemetry: componenttest.NewNopTelemetrySettings(),
 	}
 	qCfg := NewDefaultQueueConfig()
-	qCfg.ConcurrencyControllerID = configoptional.None[component.ID]()
+	qCfg.RequestMiddlewareID = configoptional.None[component.ID]()
 
 	nextSender := sender.NewSender(func(ctx context.Context, req request.Request) error {
 		return nil
@@ -243,12 +252,7 @@ func TestQueueSender_ConcurrencyController_Disabled_NoInteraction(t *testing.T) 
 	require.NoError(t, qs.Send(context.Background(), &requesttest.FakeRequest{Items: 10}))
 	require.NoError(t, qs.Shutdown(context.Background()))
 
-	// 4. Verification: Assert ABSOLUTELY NO interaction with the controller
-	// If the interface was accidentally active, these would be > 0
-	assert.Equal(t, int64(0), mockCtrl.acquired.Load(), "Acquire should not be called when controller is disabled")
-	assert.Equal(t, int64(0), mockCtrl.recorded.Load(), "Record should not be called when controller is disabled")
-	assert.Equal(t, int64(0), mockCtrl.shutdown.Load(), "Shutdown should not be called on the controller when disabled")
-
-	// Internal verification: Ensure the struct field is actually nil
-	assert.Nil(t, qs.(*queueSender).ctrl, "Internal controller field must be nil")
+	// 4. Verification: Assert ABSOLUTELY NO interaction with the mock middleware
+	assert.Equal(t, int64(0), mockMw.handled.Load(), "Handle should not be called when middleware is disabled")
+	assert.Equal(t, int64(0), mockMw.shutdown.Load(), "Shutdown should not be called on the middleware when disabled")
 }
