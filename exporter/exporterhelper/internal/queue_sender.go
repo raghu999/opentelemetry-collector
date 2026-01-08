@@ -100,34 +100,7 @@ func NewQueueSender(
 	}
 	qs.QueueBatch = qb
 
-	if len(qCfg.RequestMiddlewares) > 0 {
-		warnIfNumConsumersMayCapMiddleware(&qCfg, qSet.Telemetry.Logger)
-	}
-
 	return qs, nil
-}
-
-// warnIfNumConsumersMayCapMiddleware ensures sufficient worker headroom when request middleware is configured.
-func warnIfNumConsumersMayCapMiddleware(cfg *queuebatch.Config, logger *zap.Logger) {
-	if len(cfg.RequestMiddlewares) == 0 {
-		return
-	}
-
-	defaultConsumers := NewDefaultQueueConfig().NumConsumers
-
-	// If the user left the default worker count, warn that the worker pool might artificially cap the controller.
-	if cfg.NumConsumers == defaultConsumers && logger != nil {
-		logger.Warn("sending_queue.num_consumers is at the default; request middleware may be capped by worker pool",
-			zap.Int("num_consumers", cfg.NumConsumers),
-			zap.Strings("request_middlewares", func() []string {
-				ids := make([]string, len(cfg.RequestMiddlewares))
-				for i, id := range cfg.RequestMiddlewares {
-					ids[i] = id.String()
-				}
-				return ids
-			}()),
-		)
-	}
 }
 
 // Start overrides the default Start to resolve the extensions and wrap the sender.
