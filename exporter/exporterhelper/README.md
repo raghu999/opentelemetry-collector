@@ -180,7 +180,7 @@ Request middleware provides an extension point for intercepting and modifying ex
 - **Rate limiting / tenant-aware throttling**: Limit request rates per tenant or globally
 - **Request execution policy injection**: Add custom logic before or after request sending
 
-**Feature Gate**: This feature is currently behind the `pkg.exporterhelper.RequestMiddleware` feature gate (alpha stage). Enable it with `--feature-gates=pkg.exporterhelper.RequestMiddleware=true`.
+**Feature Gate**: This feature is currently behind the `exporter.RequestMiddleware` feature gate (alpha stage). Enable it with `--feature-gates=exporter.RequestMiddleware=true`.
 
 **Configuration**:
 

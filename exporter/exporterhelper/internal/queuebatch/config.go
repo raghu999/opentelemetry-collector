@@ -48,8 +48,8 @@ func validateConfig(cfg *Config) error {
 
 	// Validate request_middlewares configuration.
 	if len(cfg.RequestMiddlewares) > 0 {
-		if !metadata.PkgExporterhelperRequestMiddlewareFeatureGate.IsEnabled() {
-			return errors.New("request_middlewares is configured but the feature gate pkg.exporterhelper.RequestMiddleware is not enabled. Enable it with --feature-gates=pkg.exporterhelper.RequestMiddleware=true")
+		if !metadata.ExporterRequestMiddlewareFeatureGate.IsEnabled() {
+			return errors.New("request_middlewares is configured but the feature gate exporter.RequestMiddleware is not enabled. Enable it with --feature-gates=exporter.RequestMiddleware=true")
 		}
 		// Check for duplicate IDs
 		seen := make(map[component.ID]bool)

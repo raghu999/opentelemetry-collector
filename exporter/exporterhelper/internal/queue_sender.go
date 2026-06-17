@@ -117,14 +117,7 @@ func NewQueueSender(
 
 // Start overrides the default Start to resolve the extensions and wrap the sender.
 func (qs *queueSender) Start(ctx context.Context, host component.Host) error {
-	// Guard here as well as in Config.Validate() so that programmatic callers
-	// that bypass Validate() cannot run middlewares with the feature gate off.
-	if len(qs.mwIDs) > 0 && !metadata.PkgExporterhelperRequestMiddlewareFeatureGate.IsEnabled() {
-		return fmt.Errorf("request_middlewares is configured but the feature gate pkg.exporterhelper.RequestMiddleware is not enabled. Enable it with --feature-gates=pkg.exporterhelper.RequestMiddleware=true")
-	}
-
 	mws := make([]senderWrapper, 0, len(qs.mwIDs))
-
 	// 1. Resolve all extensions first to ensure they exist and implement the capability.
 	// Extensions should implement xexporterhelper.RequestMiddleware; Go's structural typing
 	// guarantees they also satisfy the local senderWrapper interface.

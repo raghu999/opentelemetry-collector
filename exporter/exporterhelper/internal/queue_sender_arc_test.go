@@ -96,9 +96,9 @@ func (w *arcWrapper) Send(ctx context.Context, req request.Request) error {
 
 func TestQueueSender_ARCLikeMiddleware(t *testing.T) {
 	// Enable the feature gate for this test
-	require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
+	require.NoError(t, featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", true))
 	defer func() {
-		_ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false)
+		_ = featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", false)
 	}()
 
 	mwID := component.MustNewIDWithName("arc", "test")
@@ -155,9 +155,9 @@ func TestQueueSender_ARCLikeMiddleware(t *testing.T) {
 }
 
 func TestQueueSender_ARCLikeMiddleware_ErrorPropagation(t *testing.T) {
-	require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
+	require.NoError(t, featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", true))
 	defer func() {
-		_ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false)
+		_ = featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", false)
 	}()
 
 	mwID := component.MustNewIDWithName("arc", "test")
@@ -199,9 +199,9 @@ func TestQueueSender_ARCLikeMiddleware_ErrorPropagation(t *testing.T) {
 }
 
 func TestQueueSender_ARCLikeMiddleware_ConcurrencyLimit(t *testing.T) {
-	require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
+	require.NoError(t, featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", true))
 	defer func() {
-		_ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false)
+		_ = featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", false)
 	}()
 
 	mwID := component.MustNewIDWithName("arc", "test")

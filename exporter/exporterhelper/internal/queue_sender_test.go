@@ -93,16 +93,16 @@ func TestQueueConfig_Validate_RequestMiddlewares(t *testing.T) {
 		qCfg.RequestMiddlewares = []component.ID{component.MustNewID("test")}
 		err := qCfg.Validate()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "request_middlewares is configured but the feature gate pkg.exporterhelper.RequestMiddleware is not enabled")
+		assert.Contains(t, err.Error(), "request_middlewares is configured but the feature gate exporter.RequestMiddleware is not enabled")
 	})
 
 	// Test with feature gate enabled
 	t.Run("feature_gate_enabled", func(t *testing.T) {
 		// Enable the feature gate for this test
-		require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
+		require.NoError(t, featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", true))
 		defer func() {
 			// Reset to disabled (alpha default)
-			_ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false)
+			_ = featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", false)
 		}()
 
 		qCfg := NewDefaultQueueConfig()
@@ -112,9 +112,9 @@ func TestQueueConfig_Validate_RequestMiddlewares(t *testing.T) {
 
 	// Test duplicate IDs
 	t.Run("duplicate_ids", func(t *testing.T) {
-		require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
+		require.NoError(t, featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", true))
 		defer func() {
-			_ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false)
+			_ = featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", false)
 		}()
 
 		qCfg := NewDefaultQueueConfig()
@@ -187,9 +187,6 @@ func (m *mockHost) GetExtensions() map[component.ID]component.Component {
 }
 
 func TestQueueSenderWithRequestMiddleware(t *testing.T) {
-	require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
-	t.Cleanup(func() { _ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false) })
-
 	mwID := component.MustNewID("request_middleware")
 	mockMw := &mockRequestMiddleware{}
 
@@ -229,9 +226,6 @@ func TestQueueSenderWithRequestMiddleware(t *testing.T) {
 }
 
 func TestQueueSender_MultipleMiddlewares_Ordering(t *testing.T) {
-	require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
-	t.Cleanup(func() { _ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false) })
-
 	// Verify that middlewares are chained correctly: m1 wraps m2 wraps base.
 	var callOrder []string
 
@@ -341,14 +335,6 @@ func TestQueueSender_Start_Errors_And_Cleanup(t *testing.T) {
 			},
 		},
 	}
-
-	// Enable the feature gate for the duration of this test; the sub-tests
-	// exercise Start()-level errors (extension not found, wrong type, wrap failure)
-	// that only surface after the gate check passes.
-	require.NoError(t, featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true))
-	t.Cleanup(func() {
-		_ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false)
-	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

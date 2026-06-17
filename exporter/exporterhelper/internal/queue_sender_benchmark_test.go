@@ -255,11 +255,11 @@ func runComparison(
 	hostExts := map[component.ID]component.Component{}
 
 	if arcMW != nil {
-		if err := featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", true); err != nil {
+		if err := featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", true); err != nil {
 			b.Fatal(err)
 		}
 		b.Cleanup(func() {
-			_ = featuregate.GlobalRegistry().Set("pkg.exporterhelper.RequestMiddleware", false)
+			_ = featuregate.GlobalRegistry().Set("exporter.RequestMiddleware", false)
 		})
 		mwID := component.MustNewIDWithName("arc", b.Name())
 		cfg.RequestMiddlewares = []component.ID{mwID}
@@ -450,85 +450,67 @@ func BenchmarkQueueSender_Comparison(b *testing.B) {
 	}
 	totalOps := int64(itersPerG * concurrentSenders)
 
+	type config struct {
+		name         string
+		numConsumers int
+		arcMW        *aimdMiddleware
+	}
+
+	// ARC starts at limit=20, floor=5, ceiling=50.
+	// The 5-floor ensures minimum parallelism is always maintained even under
+	// sustained backpressure, preventing the "serialisation trap" where ARC
+	// drops to limit=1 and becomes slower than StaticLow.
+	configs := []config{
+		{name: "StaticLow", numConsumers: 2},
+		{name: "StaticHigh", numConsumers: 50},
+		{name: "ARC", numConsumers: 50, arcMW: newAIMDMiddleware(20, 5, 50)},
+	}
+
 	type scenario struct {
 		name string
 		fn   backendFn
-		// arcInitial is the starting concurrency limit for the ARC middleware.
-		// For overload scenarios it is set BELOW the backend's hard limit so ARC
-		// discovers the limit by growing upward (negligible errors).
-		// For healthy/latency/recovery scenarios it is set higher so ARC
-		// demonstrates quick ramp-up to full throughput.
-		arcInitial int32
 	}
 
 	scenarios := []scenario{
 		{
-			// ARC starts at 20 (above any constraint) — ramps to ceiling immediately.
 			// Expected: ARC ≈ StaticHigh >> StaticLow.
-			name:       "Healthy",
-			fn:         scenarioHealthy,
-			arcInitial: 20,
+			name: "Healthy",
+			fn:   scenarioHealthy,
 		},
 		{
+			// Expected: ARC error_rate << StaticHigh; ARC dropped_count << StaticHigh.
+			// This is the DECISIVE scenario validating ARC.
 			// Backend hard limit = 10 concurrent; 10 ms normal latency.
-			// ARC starts at 5 (BELOW the hard limit) so it finds the limit by
-			// growing upward — convergence cost is negligible, error rate ≈ 0.
-			// StaticHigh starts at 50 and hammers the backend immediately.
-			// Expected: ARC error_rate ≈ 0, StaticHigh error_rate ≈ 87 %.
-			name:       "BackendOverload",
-			fn:         scenarioBackendOverload(10, 10*time.Millisecond),
-			arcInitial: 5,
+			name: "BackendOverload",
+			fn:   scenarioBackendOverload(10, 10*time.Millisecond),
 		},
 		{
 			// Expected: ARC max_in_flight < StaticHigh; ARC rtt_p99 < StaticHigh.
-			name:       "LatencySpike",
-			fn:         scenarioLatencySpike(totalOps),
-			arcInitial: 20,
+			name: "LatencySpike",
+			fn:   scenarioLatencySpike(totalOps),
 		},
 		{
 			// Expected: ARC limit decreases ahead of p99 spike; lower max_in_flight.
-			name:       "GradualLatency",
-			fn:         scenarioGradualLatency(totalOps),
-			arcInitial: 20,
+			name: "GradualLatency",
+			fn:   scenarioGradualLatency(totalOps),
 		},
 		{
-			// 25 % random errors independent of concurrency.
-			// ARC cannot reduce errors that are not caused by overload.
-			// Expected: all three configs see similar error rates (~25 %).
-			name:       "ErrorSpike",
-			fn:         scenarioErrorSpike,
-			arcInitial: 20,
+			// Expected: ARC error_rate ≤ StaticHigh; arc_final_limit shows adaptation.
+			name: "ErrorSpike",
+			fn:   scenarioErrorSpike,
 		},
 		{
 			// Expected: ARC throughput after recovery ≈ StaticHigh >> StaticLow.
-			name:       "Recovery",
-			fn:         scenarioRecovery(totalOps),
-			arcInitial: 20,
+			name: "Recovery",
+			fn:   scenarioRecovery(totalOps),
 		},
 	}
 
 	for _, sc := range scenarios {
 		b.Run(sc.name, func(b *testing.B) {
-			sc := sc
-			// Configs are defined inside the scenario loop so that BackendOverload
-			// gets a conservative ARC starting point while other scenarios start high.
-			type config struct {
-				name         string
-				numConsumers int
-				arcMW        *aimdMiddleware
-			}
-			cfgs := []config{
-				{name: "StaticLow", numConsumers: 2},
-				{name: "StaticHigh", numConsumers: 50},
-				{
-					name:         "ARC",
-					numConsumers: 50,
-					// floor=1 lets ARC back all the way down if needed; ceiling=50.
-					arcMW: newAIMDMiddleware(sc.arcInitial, 1, 50),
-				},
-			}
-			for _, cfg := range cfgs {
+			for _, cfg := range configs {
 				cfg := cfg
+				sc := sc
 				b.Run(cfg.name, func(b *testing.B) {
 					runComparison(b, cfg.numConsumers, cfg.arcMW, sc.fn)
 				})

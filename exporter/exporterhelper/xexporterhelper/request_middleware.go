@@ -25,12 +25,9 @@ type RequestMiddlewareSettings = requestmiddleware.RequestMiddlewareSettings
 //
 // Experimental: This API is at the early stage of development and may change without backward compatibility.
 type RequestMiddleware interface {
-	// WrapSender wraps next with additional request execution logic and returns
-	// the new outermost sender. The returned sender's Start and Shutdown methods
-	// are called directly by the exporterhelper infrastructure; they MUST NOT
-	// cascade those calls into next, because next's lifecycle is managed
-	// independently. A wrapper that calls next.Start or next.Shutdown will
-	// cause double-start or double-shutdown when multiple middlewares are stacked.
+	// WrapSender allows the middleware to wrap the next sender in the chain.
+	// It returns a sender that implements the specific request type.
+	// The wrapped sender can intercept Send calls to implement concurrency control, observability, or other policies.
 	//
 	// Experimental: This API is at the early stage of development and may change without backward compatibility.
 	WrapSender(settings RequestMiddlewareSettings, next Sender[Request]) (Sender[Request], error)
