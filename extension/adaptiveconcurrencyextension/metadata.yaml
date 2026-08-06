@@ -1,0 +1,79 @@
+type: adaptive_concurrency
+
+status:
+  class: extension
+  stability:
+    alpha: [extension]
+  distributions: []
+  codeowners:
+    active: []
+
+tests:
+  config:
+    min_concurrency: 10
+    max_concurrency: 100
+
+telemetry:
+  metrics:
+    adaptive_concurrency.backoff_events:
+      enabled: true
+      description: "Number of backoff events triggered."
+      stability:
+        level: development
+      unit: "{events}"
+      sum:
+        monotonic: true
+        value_type: int
+    adaptive_concurrency.failures:
+      enabled: true
+      description: "Number of failed requests."
+      stability:
+        level: development
+      unit: "{failures}"
+      sum:
+        monotonic: true
+        value_type: int
+    adaptive_concurrency.limit:
+      enabled: true
+      description: "Current concurrency limit."
+      stability:
+        level: development
+      unit: "{permits}"
+      gauge:
+        async: true
+        value_type: int
+    adaptive_concurrency.limit_changes:
+      enabled: true
+      description: "Number of times the concurrency limit has changed."
+      stability:
+        level: development
+      unit: "{changes}"
+      sum:
+        monotonic: true
+        value_type: int
+      attributes: [direction]
+    adaptive_concurrency.permits_in_use:
+      enabled: true
+      description: "Number of permits currently in use."
+      stability:
+        level: development
+      unit: "{permits}"
+      gauge:
+        async: true
+        value_type: int
+    adaptive_concurrency.rtt:
+      enabled: true
+      description: "Round trip time of requests."
+      stability:
+        level: development
+      unit: "ms"
+      histogram:
+        value_type: int
+        bucket_boundaries: [0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000]
+        record_min_max: true
+
+attributes:
+  direction:
+    description: "The direction of the limit change."
+    type: string
+    enum: [up, down]
